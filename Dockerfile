@@ -1,12 +1,16 @@
 # syntax=docker/dockerfile:1
 
-# PG_MAJOR: PostgreSQL major version to target (must match the CNPG base image tag)
+# PG_MAJOR: PostgreSQL major version (used for package names, e.g. 18)
 ARG PG_MAJOR=18
+# PG_IMAGE_TAG: CNPG base image tag — pin to a specific minor version (e.g. 18.3)
+# Defaults to PG_MAJOR so it tracks the latest minor release of that major.
+ARG PG_IMAGE_TAG=${PG_MAJOR}
 
-FROM ghcr.io/cloudnative-pg/postgresql:${PG_MAJOR}
+FROM ghcr.io/cloudnative-pg/postgresql:${PG_IMAGE_TAG}
 
-# Re-declare after FROM so the value is available in the build stage
+# Re-declare after FROM so the values are available in the build stage
 ARG PG_MAJOR=18
+ARG PG_IMAGE_TAG=${PG_MAJOR}
 
 # REPO_DISTRO: Debian codename for the TimescaleDB apt repo.
 # Defaults to empty — in which case the OS codename is auto-detected at build time.
