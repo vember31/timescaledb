@@ -1,8 +1,6 @@
 name: Build and Push TimescaleDB CNPG Extension Image
 
 on:
-  push:
-    tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
       tsdb_version:
@@ -61,10 +59,8 @@ jobs:
             type=raw,value=latest
             # pg18 — floating tag, updated on every build
             type=raw,value=pg${{ matrix.pg_major }}
-            # 2.25.2-pg18 — TimescaleDB version tag (set when triggered by release check)
-            type=raw,value=${{ inputs.tsdb_version }}-pg${{ matrix.pg_major }},enable=${{ inputs.tsdb_version != '' }}
-            # v1.2.3-pg18 — immutable tag on version tags
-            type=ref,event=tag,suffix=-pg${{ matrix.pg_major }}
+            # 2.25.2 — TimescaleDB version tag (set when triggered by release check or manual dispatch)
+            type=raw,value=${{ inputs.tsdb_version }},enable=${{ inputs.tsdb_version != '' }}
             # sha-abc1234-pg18 — commit-pinned tag for every build
             type=sha,suffix=-pg${{ matrix.pg_major }}
 
