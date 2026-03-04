@@ -52,8 +52,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            # pg18 — floating tag, updated on every push to main (and weekly rebuilds)
-            type=raw,value=pg${{ matrix.pg_major }},enable={{is_default_branch}}
+            # latest — always updated on every build
+            type=raw,value=latest
+            # pg18 — floating tag, updated on every build
+            type=raw,value=pg${{ matrix.pg_major }}
             # v1.2.3-pg18 — immutable tag on version tags
             type=ref,event=tag,suffix=-pg${{ matrix.pg_major }}
             # sha-abc1234-pg18 — commit-pinned tag for every build
@@ -68,6 +70,8 @@ jobs:
         with:
           context: .
           push: true
+          provenance: false
+          sbom: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
