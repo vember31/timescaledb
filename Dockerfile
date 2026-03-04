@@ -5,36 +5,23 @@ ARG PG_MAJOR=18
 # PG_IMAGE_TAG: CNPG base image tag — pin to a specific minor version (e.g. 18.3)
 # Defaults to PG_MAJOR so it tracks the latest minor release of that major.
 ARG PG_IMAGE_TAG=${PG_MAJOR}
+# DISTRO: Debian codename used in the CNPG base image tag and the TimescaleDB apt repo (e.g. trixie)
+ARG DISTRO=trixie
 
-FROM ghcr.io/cloudnative-pg/postgresql:${PG_IMAGE_TAG}
+FROM ghcr.io/cloudnative-pg/postgresql:${PG_IMAGE_TAG}-minimal-${DISTRO} AS builder
 
-# Re-declare after FROM so the values are available in the build stage
+# Re-declare after FROM so the values are available in this build stage
 ARG PG_MAJOR=18
-ARG PG_IMAGE_TAG=${PG_MAJOR}
+ARG DISTRO=trixie
 
-# REPO_DISTRO: Debian codename for the TimescaleDB apt repo.
-# Defaults to empty — in which case the OS codename is auto-detected at build time.
-# Override if packagecloud.io/timescale does not yet carry packages for your distro
-# (e.g. --build-arg REPO_DISTRO=bookworm).
-ARG REPO_DISTRO=
-
-USER root
+USER 0
 
 RUN set -eux; \
-    # Install prerequisites
     apt-get update; \
     apt-get install -y --no-install-recommends \
         curl \
         gnupg \
     ; \
-    \
-    # Determine the repo distro — use the override if set, otherwise read from OS
-    if [ -n "${REPO_DISTRO}" ]; then \
-        DISTRO="${REPO_DISTRO}"; \
-    else \
-        . /etc/os-release; \
-        DISTRO="${VERSION_CODENAME}"; \
-    fi; \
     \
     # Add the Timescale apt repository
     curl -fsSL https://packagecloud.io/timescale/timescaledb/gpgkey \
@@ -53,5 +40,19 @@ RUN set -eux; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*
 
-# CNPG images run as UID 26 (postgres)
-USER 26
+# Extension image: contains only the extension files, no full PostgreSQL installation.
+# CNPG mounts this as an OCI image volume and automatically appends the paths to
+# extension_control_path and dynamic_library_path (PostgreSQL 18 GUCs).
+# Requires CNPG >= 1.27 and Kubernetes >= 1.33 (ImageVolume feature gate) or >= 1.35 (GA).
+#
+# Note: TimescaleDB still requires shared_preload_libraries in the Cluster manifest:
+#   postgresql:
+#     shared_preload_libraries:
+#       - timescaledb
+FROM scratch
+ARG PG_MAJOR=18
+
+COPY --from=builder /usr/lib/postgresql/${PG_MAJOR}/lib/timescaledb*.so /lib/
+COPY --from=builder /usr/share/postgresql/${PG_MAJOR}/extension/timescaledb* /share/extension/
+
+USER 65532:65532

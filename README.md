@@ -1,8 +1,12 @@
 # timescaledb-cnpg
 
-Custom PostgreSQL container images with [TimescaleDB](https://www.timescale.com/) pre-installed, built for use with [CloudNativePG](https://cloudnative-pg.io/) (CNPG).
+[TimescaleDB](https://www.timescale.com/) extension images for [CloudNativePG](https://cloudnative-pg.io/) (CNPG), built using the [ImageVolume extension model](https://cloudnative-pg.io/docs/1.28/imagevolume_extensions/) introduced in CNPG 1.27.
+
+Rather than shipping a custom full PostgreSQL image, this repo produces a lightweight `FROM scratch` image containing only the TimescaleDB shared libraries and extension control files. CNPG mounts it as an OCI image volume and wires up the extension paths automatically.
 
 Images are published to GitHub Container Registry and rebuilt automatically every week to include the latest TimescaleDB patch releases and OS security updates.
+
+**Requirements:** CNPG ≥ 1.27, Kubernetes ≥ 1.33 (ImageVolume feature gate) or ≥ 1.35 (GA).
 
 ---
 
@@ -39,13 +43,23 @@ metadata:
 spec:
   instances: 3
 
-  # Reference the custom image
-  imageName: ghcr.io/<owner>/<repo>:pg18
+  # Use the standard CNPG image — no custom imageName needed
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.3-standard-trixie
 
   postgresql:
     parameters:
-      # TimescaleDB must be loaded at startup
-      shared_preload_libraries: "timescaledb"
+      max_locks_per_transaction: "128"           # recommended for TimescaleDB
+      timescaledb.max_background_workers: "32"
+      timescaledb.max_tuples_decompressed_per_dml_transaction: "0"
+      timescaledb.telemetry_level: "off"
+    # TimescaleDB must be loaded at startup; this cannot be set automatically
+    # by the extension image mechanism
+    shared_preload_libraries:
+      - timescaledb
+    extensions:
+      - name: timescaledb
+        image:
+          reference: ghcr.io/<owner>/<repo>:pg18
 
   storage:
     size: 20Gi
@@ -69,26 +83,23 @@ Prerequisites: Docker with Buildx.
 # Build for PG 18 (default)
 docker build -t timescaledb-cnpg:pg18 .
 
-# Build for a different PG major version
-docker build --build-arg PG_MAJOR=17 -t timescaledb-cnpg:pg17 .
+# Pin to a specific CNPG minor release
+docker build --build-arg PG_IMAGE_TAG=18.3 -t timescaledb-cnpg:pg18 .
 
-# Override the apt repo distro if packagecloud doesn't carry packages
-# for your base image's Debian codename yet
-docker build --build-arg REPO_DISTRO=bookworm -t timescaledb-cnpg:pg18 .
+# Override the Debian codename (for base image and apt repo)
+docker build --build-arg DISTRO=bookworm -t timescaledb-cnpg:pg18 .
 ```
 
 ---
 
 ## How it works
 
-The `Dockerfile`:
+The `Dockerfile` uses a two-stage build:
 
-1. Starts from the official CNPG base image (`ghcr.io/cloudnative-pg/postgresql:<PG_MAJOR>`)
-2. Adds the Timescale apt repository (packagecloud.io/timescale), auto-detecting the Debian codename from the base image
-3. Installs `timescaledb-2-postgresql-<PG_MAJOR>` (latest available)
-4. Drops back to the CNPG postgres user (UID 26)
+1. **Builder stage**: starts from `ghcr.io/cloudnative-pg/postgresql:<tag>-minimal-<distro>`, adds the Timescale apt repository, and installs `timescaledb-2-postgresql-<PG_MAJOR>`
+2. **Final stage**: `FROM scratch` — copies only the extension's shared libraries (`/lib/timescaledb*.so`) and control files (`/share/extension/timescaledb*`)
 
-All CNPG tooling (Barman Cloud, pg_basebackup, etc.) is inherited unchanged from the base image.
+CNPG mounts the final image as an OCI image volume and automatically appends its paths to `extension_control_path` and `dynamic_library_path` (PostgreSQL 18 GUCs). The standard CNPG PostgreSQL image is used as the cluster's operand; no custom `imageName` is required.
 
 ---
 
@@ -98,9 +109,13 @@ Edit the matrix in `.github/workflows/build.yml`:
 
 ```yaml
 matrix:
-  pg_major:
-    - "18"
-    - "17"   # add more versions here
+  include:
+    - pg_major: "18"
+      pg_image_tag: "18.3"
+      distro: "trixie"
+    - pg_major: "17"
+      pg_image_tag: "17.5"
+      distro: "bookworm"
 ```
 
 Each version produces its own set of tags (e.g. `pg17`, `v1.2.3-pg17`).
