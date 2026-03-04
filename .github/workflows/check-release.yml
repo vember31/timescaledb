@@ -43,7 +43,7 @@ jobs:
         if: steps.latest.outputs.tag != steps.stored.outputs.tag && steps.latest.outputs.tag != ''
         run: |
           echo "New release detected (${{ steps.stored.outputs.tag }} → ${{ steps.latest.outputs.tag }}), triggering build"
-          gh workflow run build.yml
+          gh workflow run build.yml -f tsdb_version="${{ steps.latest.outputs.tag }}"
           echo "${{ steps.latest.outputs.tag }}" > .timescaledb-version
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
