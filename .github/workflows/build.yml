@@ -42,6 +42,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Resolve TimescaleDB version
+        id: tsdb
+        run: |
+          if [ -n "${{ inputs.tsdb_version }}" ]; then
+            version="${{ inputs.tsdb_version }}"
+          else
+            version=$(curl -fsSL \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/timescale/timescaledb/releases/latest \
+              | jq -r '.tag_name')
+          fi
+          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "Resolved TimescaleDB version: $version"
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -59,8 +73,8 @@ jobs:
             type=raw,value=latest
             # pg18 — floating tag, updated on every build
             type=raw,value=pg${{ matrix.pg_major }}
-            # 2.25.2 — TimescaleDB version tag (set when triggered by release check or manual dispatch)
-            type=raw,value=${{ inputs.tsdb_version }},enable=${{ inputs.tsdb_version != '' }}
+            # 2.25.2 — TimescaleDB version tag (auto-resolved from latest release if not provided)
+            type=raw,value=${{ steps.tsdb.outputs.version }},enable=${{ steps.tsdb.outputs.version != '' }}
             # sha-abc1234-pg18 — commit-pinned tag for every build
             type=sha,suffix=-pg${{ matrix.pg_major }}
 
