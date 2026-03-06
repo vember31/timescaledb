@@ -1,0 +1,58 @@
+name: Check for new TimescaleDB Toolkit release
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"   # Mondays at 07:00 UTC (one hour after the timescaledb check)
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Check TimescaleDB Toolkit release
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get latest TimescaleDB Toolkit release
+        id: latest
+        run: |
+          tag=$(curl -fsSL \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/timescale/timescaledb-toolkit/releases/latest \
+            | jq -r '.tag_name')
+          echo "tag=$tag" >> $GITHUB_OUTPUT
+          echo "Latest TimescaleDB Toolkit release: $tag"
+
+      - name: Get last built version
+        id: stored
+        run: |
+          if [ -f .timescaledb-toolkit-version ]; then
+            stored=$(cat .timescaledb-toolkit-version)
+          else
+            stored=""
+          fi
+          echo "tag=$stored" >> $GITHUB_OUTPUT
+          echo "Last built version: ${stored:-"(none)"}"
+
+      - name: Trigger build and record version
+        if: steps.latest.outputs.tag != steps.stored.outputs.tag && steps.latest.outputs.tag != ''
+        run: |
+          echo "New release detected (${{ steps.stored.outputs.tag }} → ${{ steps.latest.outputs.tag }}), triggering build"
+          gh workflow run build-toolkit.yml -f tsdb_toolkit_version="${{ steps.latest.outputs.tag }}"
+          echo "${{ steps.latest.outputs.tag }}" > .timescaledb-toolkit-version
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .timescaledb-toolkit-version
+          git commit -m "chore: bump tracked TimescaleDB Toolkit version to ${{ steps.latest.outputs.tag }}"
+          git push
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: No new release
+        if: steps.latest.outputs.tag == steps.stored.outputs.tag
+        run: echo "Already at ${{ steps.stored.outputs.tag }}, no build needed"

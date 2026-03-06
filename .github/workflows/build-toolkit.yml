@@ -1,0 +1,94 @@
+name: Build and Push TimescaleDB Toolkit CNPG Extension Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      tsdb_toolkit_version:
+        description: "TimescaleDB Toolkit version being built (e.g. 1.22.0). Used to tag the image."
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/timescaledb-toolkit
+
+jobs:
+  build:
+    name: Build pg${{ matrix.pg_major }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pg_major: "18"
+            pg_image_tag: "18.3"
+            distro: "trixie"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve TimescaleDB Toolkit version
+        id: toolkit
+        run: |
+          if [ -n "${{ inputs.tsdb_toolkit_version }}" ]; then
+            version="${{ inputs.tsdb_toolkit_version }}"
+          else
+            version=$(curl -fsSL \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/timescale/timescaledb-toolkit/releases/latest \
+              | jq -r '.tag_name')
+          fi
+          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "Resolved TimescaleDB Toolkit version: $version"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # latest — always updated on every build
+            type=raw,value=latest
+            # pg18 — floating tag, updated on every build
+            type=raw,value=pg${{ matrix.pg_major }}
+            # 1.22.0 — toolkit version tag (auto-resolved from latest release if not provided)
+            type=raw,value=${{ steps.toolkit.outputs.version }},enable=${{ steps.toolkit.outputs.version != '' }}
+            # sha-abc1234-pg18 — commit-pinned tag for every build
+            type=sha,suffix=-pg${{ matrix.pg_major }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.toolkit
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PG_MAJOR=${{ matrix.pg_major }}
+            PG_IMAGE_TAG=${{ matrix.pg_image_tag }}
+            DISTRO=${{ matrix.distro }}
+          cache-from: type=gha,scope=toolkit-pg${{ matrix.pg_major }}
+          cache-to: type=gha,mode=max,scope=toolkit-pg${{ matrix.pg_major }}
+
+      - name: Image digest
+        run: echo "Pushed ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} digest=${{ steps.build.outputs.digest }}"
